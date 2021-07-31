@@ -1,0 +1,114 @@
+---
+title: "Prediction Assignment"
+author: "LM"
+date: "7/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Summary of Project
+The datasets utilized in this project were generated from 6 individuals who utilzed exercise tracking devices while completing barbell lifts correctly and incorrectly in 5 different ways. Information about the dataat:http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. The data will be used to build a model to attempt to predict how the exercise was performed. The classifications include: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)
+
+
+#### Loading and cleaning the data
+
+R packages utilized include tidyverse, caret, randomForest, janitor, e1071, and gtsummary. A seed of 500 was set to assure reproducibility.  Cleaning the data consisted of the following steps: 1. removing columns with that contained only NA values, 2. removing metadata columns, and 3. removing highly correlated variables.  The training dataset was also evaluated to determine if there were any near zero variance variables but there were none after completing the 3 steps.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(janitor)
+library(e1071)
+
+set.seed(500)
+
+train_full<- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), stringsAsFactors = T)
+
+validate_df<- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), stringsAsFactors = T)
+
+train_sub<- train_full[,map(train_full, ~sum(is.na(.)))==0]
+ind<- map(train_full, ~sum(is.na(.)))==0
+validate_sub<- validate_df[,ind]
+
+equal<- all_equal(train_sub, validate_sub)
+
+validate_sub <- validate_sub[,-93]
+
+comp<- compare_df_cols(train_sub, validate_sub, return = "mismatch")
+
+ind_valid<- map(validate_sub, ~sum(is.na(.)))==0
+
+validate_final<- validate_sub[,ind_valid]
+
+train_sub<- train_sub[,ind_valid] 
+
+
+train_sub<- train_sub[,-c(1:7)]
+validate_final<- validate_final[,-c(1:7)]
+
+nzv<- nearZeroVar(train_sub)
+
+train_cor<- cor(train_sub[,-53])
+highCor<- findCorrelation(train_cor, cutoff = 0.8, exact = T)
+
+train_sub<- train_sub[,-highCor]
+validate_final<- validate_final[,-highCor]
+```
+
+Final cleaned datasets
+Training data:
+```{r}
+dim(train_sub)
+```
+
+Validation data
+```{r}
+dim(validate_final)
+```
+
+
+#### Partioning the data and creating a Random Forest model
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+inTrain <- createDataPartition(y = train_sub$classe, p = 0.6, list = FALSE)
+training<- train_sub[inTrain,]
+testing<- train_sub[-inTrain,]
+
+
+mod_rf<- train(classe~., 
+               data = training, 
+               method = "ranger", 
+               trControl = trainControl(method = "cv", 
+                                        number = 3, 
+                                        verboseIter = F))
+
+predict_rf<- predict(mod_rf, newdata = testing)
+
+confusionMatrix(predict_rf, testing$classe)
+```
+
+The accuracy of the random forest model is 0.9932 which indicates the model will be good at predicting the class of exercise, especially when compared to the no information rate of 0.2845. Additionally, the sensitivity (True positive/True positive + False negative) and the specificity (true negative/true negative + false positive) are high across all classes.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(gtsummary)
+final<- predict(mod_rf, newdata = validate_final)
+f<- data.frame(final)
+theme_gtsummary_compact()
+tbl_summary(f, 
+            type = all_categorical()~ "categorical",
+            label = final ~ "Exercise class") %>% 
+        modify_header(label = " ") %>% 
+        bold_labels() 
+```
+
+### Appendix
+
+The plot of the random forest model indicates that utilizing 20 variables results in only a slightly less accurate model than the 40 variable model. Reducing the number of variable may decrease the out of sample error and improve the model without sacrificing accuracy.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+plot(mod_rf)
+```
+
